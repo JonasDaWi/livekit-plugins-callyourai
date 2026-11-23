@@ -20,7 +20,7 @@ from livekit.agents import AgentSession
 from livekit.agents.types import ATTRIBUTE_PUBLISH_ON_BEHALF
 from livekit.agents.voice.avatar import DataStreamAudioOutput
 
-DEFAULT_API_URL = "https://api.callyourai.com"
+DEFAULT_API_URL = "https://api.callyour.ai"
 MOOD_ATTRIBUTE = "callyourai.mood"
 SAMPLE_RATE = 16000
 

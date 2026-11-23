@@ -57,7 +57,7 @@ async def main() -> int:
     ap.add_argument("--interrupt", required=True)
     args = ap.parse_args()
     url, key, secret = (os.environ[k] for k in ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"))
-    base = os.environ.get("CALLYOURAI_API_URL", "https://api.callyourai.com")
+    base = os.environ.get("CALLYOURAI_API_URL", "https://api.callyour.ai")
     headers = {"authorization": f"Bearer {os.environ['CALLYOURAI_API_KEY']}"}
     room_name = args.room_prefix + secrets.token_hex(3)
     async with httpx.AsyncClient() as http:
