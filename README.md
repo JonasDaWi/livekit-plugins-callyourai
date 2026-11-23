@@ -16,6 +16,9 @@ async def entrypoint(ctx):
                         room_options=room_io.RoomOptions(audio_output=False))
 ```
 
+A complete agent is in `examples/agent.py`; `examples/talk_check.py` calls it without a browser and prints
+what arrived and what was billed.
+
 Environment: `CALLYOURAI_API_KEY`, plus the usual `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`.
 
 No account yet? Three calls:
