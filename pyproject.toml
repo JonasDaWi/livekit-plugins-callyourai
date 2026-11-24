@@ -1,14 +1,33 @@
 [project]
 name = "livekit-plugins-callyourai"
 version = "0.1.0"
-description = "callyourai avatars for LiveKit Agents: give your voice agent a face"
-requires-python = ">=3.10"
-dependencies = ["livekit-agents>=1.2", "httpx>=0.27"]
+description = "callyour.ai avatars for LiveKit Agents: give your voice agent a face"
 readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "callyour.ai", email = "support@callyour.ai" }]
+keywords = ["livekit", "agents", "avatar", "voice", "realtime", "lip-sync"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = ["livekit-agents>=1.2", "httpx>=0.27"]
+
+[project.urls]
+Homepage = "https://callyour.ai"
+Documentation = "https://api.callyour.ai/llms.txt"
+Source = "https://github.com/JonasDaWi/livekit-plugins-callyourai"
+Issues = "https://github.com/JonasDaWi/livekit-plugins-callyourai/issues"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["livekit"]
+
+[tool.hatch.build.targets.sdist]
+include = ["livekit", "examples", "README.md", "LICENSE"]
