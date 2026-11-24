@@ -25,7 +25,7 @@ what arrived and what was billed.
 
 Environment: `CALLYOURAI_API_KEY`, plus the usual `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`.
 
-No account yet? Three calls (full guide for people and coding agents: https://api.callyour.ai/llms.txt):
+No account yet? Three calls. The full guide for people and coding agents is at https://api.callyour.ai/llms.txt
 
 ```bash
 API=https://api.callyour.ai
