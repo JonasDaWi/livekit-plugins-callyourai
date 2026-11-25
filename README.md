@@ -30,12 +30,12 @@ No account yet? Three calls. The full guide for people and coding agents is at h
 ```bash
 API=https://api.callyour.ai
 curl -X POST $API/v1/signup -d '{"email":"you@example.com"}' -H 'content-type: application/json'   # -> api_key
-curl -X POST $API/v1/credits/checkout -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{"amount_usd":10}'
+curl -X POST $API/v1/credits/checkout -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{"amount":10}'   # euros
 curl -X POST $API/v1/avatars -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
      -d '{"name":"Me","image_url":"https://example.com/me.jpg"}'                                    # -> id
 ```
 
-Sessions are billed per second from your credits while the avatar's video is live. `CallyouraiError.code`
+Sessions are billed per second from your prepaid euro credits while the avatar's video is live. `CallyouraiError.code`
 tells you why a start was refused (`insufficient_credits`, `no_capacity`, ...).
 
 Questions: support@callyour.ai · Terms and pricing: https://callyour.ai

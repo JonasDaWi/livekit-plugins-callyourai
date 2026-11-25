@@ -182,9 +182,9 @@ async def main() -> int:
     async with httpx.AsyncClient() as http:
         after = (await http.get(f"{base}/v1/balance", headers=headers)).json()
         usage = (await http.get(f"{base}/v1/usage", headers=headers)).json()
-    report["balance_before_usd"] = before.get("balance_usd")
-    report["balance_after_usd"] = after.get("balance_usd")
-    report["available_after_usd"] = after.get("available_usd")
+    report["balance_before"] = before.get("balance", before.get("balance_usd"))
+    report["balance_after"] = after.get("balance", after.get("balance_usd"))
+    report["available_after"] = after.get("available", after.get("available_usd"))
     report["usage"] = usage
     print(json.dumps(report, indent=1), flush=True)
     return 0 if frames else 1
