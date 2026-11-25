@@ -14,6 +14,12 @@ another worker, under the same participant identity; the agent keeps talking. ``
 ``avatar_lost``, ``avatar_recovered`` and ``avatar_recovery_failed`` for whoever wants to know:
 
     avatar.on("avatar_recovered", lambda: logger.info("avatar is back"))
+
+When every avatar is busy, ``wait_seconds`` lets the session wait in the queue instead of failing. With
+``audio_while_waiting=True`` and an agent session that already publishes its own audio (call
+``avatar.start`` after ``session.start`` without ``audio_output=False``), the agent talks voice-only while it
+waits and its speech moves to the avatar as soon as the avatar is live. Otherwise ``start`` waits for its turn.
+Events: ``avatar_queued`` (queue position), ``avatar_joined``, ``avatar_unavailable`` (the wait ran out).
 """
 
 from __future__ import annotations
@@ -59,6 +65,9 @@ class AvatarSession(rtc.EventEmitter[str]):
         avatar_participant_identity: str = "callyourai-avatar",
         avatar_participant_name: str = "Avatar",
         max_minutes: float | None = None,
+        wait_seconds: int = 0,
+        audio_while_waiting: bool = True,
+        hd: bool = False,
     ) -> None:
         self._avatar_id = avatar_id
         self._api_key = api_key or os.environ.get("CALLYOURAI_API_KEY")
@@ -68,12 +77,16 @@ class AvatarSession(rtc.EventEmitter[str]):
         self._identity = avatar_participant_identity
         self._name = avatar_participant_name
         self._max_minutes = max_minutes
+        self._wait_seconds = max(0, min(int(wait_seconds), 120))
+        self._audio_while_waiting = audio_while_waiting
+        self._hd = hd
         super().__init__()
         self._room: rtc.Room | None = None
         self._audio: DataStreamAudioOutput | None = None
         self._livekit: tuple[str, str, str] | None = None
         self._closing = False
         self._recovering: asyncio.Task | None = None
+        self._joining: asyncio.Task | None = None
         self.session_id: str | None = None
 
     async def _call(self, method: str, path: str, body: dict | None = None) -> dict:
@@ -107,15 +120,66 @@ class AvatarSession(rtc.EventEmitter[str]):
         body = {"avatar_id": self._avatar_id, "livekit_url": url, "livekit_token": self._token()}
         if self._max_minutes:
             body["max_minutes"] = self._max_minutes
-        self.session_id = (await self._call("POST", "/v1/sessions", body))["session_id"]
+        if self._wait_seconds:
+            body["wait_seconds"] = self._wait_seconds
+        if self._hd:
+            body["hd"] = True
+        answer = await self._call("POST", "/v1/sessions", body)
+        self.session_id = answer["session_id"]
+        room.on("participant_disconnected", self._on_participant_disconnected)
+        if answer.get("status") != "queued":
+            self._attach(agent_session)
+            return
+        logger.info("all avatars are busy; waiting in the queue",
+                    extra={"session_id": self.session_id, "position": answer.get("queue_position")})  # fmt: skip
+        self.emit("avatar_queued", answer.get("queue_position"))
+        if self._audio_while_waiting and agent_session.output.audio is not None:
+            # The agent already speaks into the room itself: keep that until the avatar is live.
+            self._joining = asyncio.create_task(self._join_when_ready(agent_session))
+            return
+        if not await self._wait_until_started():
+            raise CallyouraiError(503, "no_capacity", "No avatar came free within wait_seconds.")
+        self._attach(agent_session)
+
+    def _attach(self, agent_session: AgentSession) -> None:
+        """Route the agent's speech to the avatar participant."""
         self._audio = DataStreamAudioOutput(
-            room=room,
+            room=self._room,
             destination_identity=self._identity,
             sample_rate=SAMPLE_RATE,
             wait_remote_track=rtc.TrackKind.KIND_VIDEO,
         )
-        agent_session.output.audio = self._audio
-        room.on("participant_disconnected", self._on_participant_disconnected)
+        if agent_session.output.audio is None:
+            agent_session.output.audio = self._audio
+        else:
+            # Keep wrappers such as the transcript synchronizer; swap only the sink at the end of the chain.
+            agent_session.output.replace_audio_tail(self._audio)
+
+    async def _wait_until_started(self, live: bool = False) -> bool:
+        """Poll the queued session until a worker has it (or, with ``live``, until its video is live)."""
+        deadline = time.monotonic() + self._wait_seconds + 30
+        wanted = ("live",) if live else ("starting", "live")
+        while not self._closing and self.session_id is not None and time.monotonic() < deadline:
+            state = await self._call("GET", f"/v1/sessions/{self.session_id}")
+            if state.get("status") in wanted:
+                return True
+            if state.get("status") == "ended":
+                return False
+            await asyncio.sleep(2)
+        return False
+
+    async def _join_when_ready(self, agent_session: AgentSession) -> None:
+        try:
+            if await self._wait_until_started(live=True):
+                self._attach(agent_session)
+                logger.info("avatar joined; the agent's speech goes to it now", extra={"session_id": self.session_id})
+                self.emit("avatar_joined")
+            else:
+                logger.warning("no avatar came free; the agent stays voice-only", extra={"session_id": self.session_id})
+                self.emit("avatar_unavailable")
+        except Exception as error:  # noqa: BLE001 - the call goes on voice-only
+            logger.error("waiting for the avatar failed", extra={"error": str(error)})
+            self.emit("avatar_unavailable")
 
     def _token(self) -> str:
         """A join token for the avatar participant: fresh for every worker that takes the session."""
@@ -191,8 +255,9 @@ class AvatarSession(rtc.EventEmitter[str]):
     async def aclose(self) -> None:
         """End the avatar session now. It also ends by itself when the agent leaves the room."""
         self._closing = True
-        if self._recovering is not None and not self._recovering.done():
-            self._recovering.cancel()
+        for task in (self._recovering, self._joining):
+            if task is not None and not task.done():
+                task.cancel()
         if self.session_id is not None:
             session_id, self.session_id = self.session_id, None
             await self._call("DELETE", f"/v1/sessions/{session_id}")

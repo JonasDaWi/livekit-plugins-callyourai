@@ -35,6 +35,22 @@ curl -X POST $API/v1/avatars -H "authorization: Bearer $KEY" -H 'content-type: a
      -d '{"name":"Me","image_url":"https://example.com/me.jpg"}'                                    # -> id
 ```
 
+## When every avatar is busy
+
+By default `start` raises `CallyouraiError` with code `no_capacity` when no avatar is free. Pass `wait_seconds`
+(up to 120) to wait in the queue instead:
+
+```python
+avatar = callyourai.AvatarSession(avatar_id="YOUR_AVATAR_ID", wait_seconds=60)
+await session.start(agent=MyAgent(), room=ctx.room)      # the agent speaks into the room itself
+await avatar.start(session, room=ctx.room)                # returns at once if queued
+```
+
+Started after `session.start` like this, the agent talks voice-only while the avatar waits, and its speech moves
+to the avatar as soon as the avatar is live. Started before `session.start` (with `audio_output=False`), `start`
+waits for the avatar instead. Waiting is free; billing starts when the avatar's video is live. Events:
+`avatar_queued`, `avatar_joined`, `avatar_unavailable`.
+
 Sessions are billed per second from your prepaid euro credits while the avatar's video is live. `CallyouraiError.code`
 tells you why a start was refused (`insufficient_credits`, `no_capacity`, ...).
 
