@@ -9,7 +9,7 @@
 The avatar joins the room as its own participant and publishes video plus the agent's voice, in sync.
 The agent's speech goes to it as a data stream instead of being published by the agent itself.
 
-If the GPU worker rendering the avatar fails mid-call, the plugin asks the API to put the avatar back on
+If the server rendering the avatar fails mid-call, the plugin asks the API to put the avatar back on
 another worker, under the same participant identity; the agent keeps talking. ``AvatarSession`` emits
 ``avatar_lost``, ``avatar_recovered`` and ``avatar_recovery_failed`` for whoever wants to know:
 
