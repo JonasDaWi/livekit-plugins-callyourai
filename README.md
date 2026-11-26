@@ -51,6 +51,28 @@ to the avatar as soon as the avatar is live. Started before `session.start` (wit
 waits for the avatar instead. Waiting is free; billing starts when the avatar's video is live. Events:
 `avatar_queued`, `avatar_joined`, `avatar_unavailable`.
 
+## Live HD
+
+`hd=True` renders the avatar sharper (Live HD Priority, €0.30 per minute instead of €0.10) and puts the session
+ahead of the queue. An HD server may take up to a minute or two to come free, so pass `wait_seconds` with it.
+
+To start at once and still get HD, upgrade within the call:
+
+```python
+avatar = callyourai.AvatarSession(avatar_id="YOUR_AVATAR_ID", upgrade_to_hd=True)
+```
+
+The call starts on the normal avatar. As soon as an HD server is ready, the HD avatar joins the room as a second
+participant (`callyourai-avatar-hd`), and once its video is live the agent's speech switches to it between two
+sentences; then the normal avatar leaves. There is no gap in video or voice: for a moment both avatars are in the
+room. The normal session is billed until the HD avatar is live, the HD session from then on (one row each in
+`GET /v1/usage`, linked by `upgraded_from`). Events: `avatar_upgrading`, `avatar_upgraded`,
+`avatar_upgrade_failed` (no HD server came free in time; the call stays on the normal avatar).
+
+If your frontend shows the avatar's video itself, show the participant named by the agent's attribute
+`callyourai.avatar` (it changes from `callyourai-avatar` to `callyourai-avatar-hd` at the switch). Frontends that
+pick the avatar with LiveKit's `useVoiceAssistant` switch when the normal avatar leaves.
+
 Sessions are billed per second from your prepaid euro credits while the avatar's video is live. `CallyouraiError.code`
 tells you why a start was refused (`insufficient_credits`, `no_capacity`, ...).
 
