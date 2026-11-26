@@ -26,6 +26,9 @@ rendering server is ready: the HD avatar joins as a second participant (``<ident
 is live the agent's speech switches to it between two sentences and the normal avatar leaves. Whoever shows
 "the avatar" should follow the agent's participant attribute ``callyourai.avatar`` (the identity of the
 avatar that speaks now). Events: ``avatar_upgrading``, ``avatar_upgraded``, ``avatar_upgrade_failed``.
+
+``set_mood("friendly")`` sets the face for what the agent says next; ``set_action("wave")`` plays a one-shot
+gesture (see ``ACTIONS``), visible about three seconds later, after which the avatar is back in its mood.
 """
 
 from __future__ import annotations
@@ -51,9 +54,17 @@ RECOVER_GRACE_SECONDS = 3.0
 # ... and how long it keeps asking while no worker is free.
 RECOVER_GIVE_UP_SECONDS = 90.0
 MOOD_ATTRIBUTE = "callyourai.mood"
+# "<name>:<counter>" on the agent participant: the counter makes a repeated gesture a change.
+ACTION_ATTRIBUTE = "callyourai.action"
+# One-shot gestures for ``AvatarSession.set_action``.
+ACTIONS = ("wave", "thumbs_up", "explain_hands", "look_side", "tilt_smile", "laugh", "surprised", "angry")
 # The agent's attribute naming the avatar participant that speaks now (changes on an upgrade to HD).
 ACTIVE_AVATAR_ATTRIBUTE = "callyourai.avatar"
 # Before the switch to the HD avatar: time for viewers to subscribe to its video and decode a first frame ...
+# With an agent that already speaks into the room itself, start() waits this long for a free avatar's video.
+# If it is there, the avatar speaks from the first word. If not (a cold start), the agent begins with its own
+# voice and the avatar takes over later, between two sentences, so that nothing that is being said is lost.
+JOIN_GRACE_SECONDS = 4.0
 UPGRADE_SETTLE_SECONDS = 1.0
 # ... and the longest wait for a pause in the agent's speech (after that it switches mid-sentence).
 UPGRADE_PAUSE_WAIT_SECONDS = 30.0
@@ -92,6 +103,7 @@ class AvatarSession(rtc.EventEmitter[str]):
         self._identity = avatar_participant_identity
         self._name = avatar_participant_name
         self._max_minutes = max_minutes
+        self._actions = 0
         self._wait_seconds = max(0, min(int(wait_seconds), 120))
         self._audio_while_waiting = audio_while_waiting
         self._hd = hd
@@ -151,13 +163,20 @@ class AvatarSession(rtc.EventEmitter[str]):
         room.on("participant_disconnected", self._on_participant_disconnected)
         if self._upgrade_to_hd:
             self._upgrading = asyncio.create_task(self._upgrade())
+        own_voice = self._audio_while_waiting and agent_session.output.audio is not None
         if answer.get("status") != "queued":
-            self._attach(agent_session)
+            if not own_voice or await self._wait_for_video(self._identity, JOIN_GRACE_SECONDS):
+                self._attach(agent_session)
+                return
+            # A worker has the session but its video is not there yet (it is still loading the avatar).
+            logger.info("the avatar is still starting; the agent speaks with its own voice until it is live",
+                        extra={"session_id": self.session_id})  # fmt: skip
+            self._joining = asyncio.create_task(self._join_when_ready(agent_session))
             return
         logger.info("all avatars are busy; waiting in the queue",
                     extra={"session_id": self.session_id, "position": answer.get("queue_position")})  # fmt: skip
         self.emit("avatar_queued", answer.get("queue_position"))
-        if self._audio_while_waiting and agent_session.output.audio is not None:
+        if own_voice:
             # The agent already speaks into the room itself: keep that until the avatar is live.
             self._joining = asyncio.create_task(self._join_when_ready(agent_session))
             return
@@ -212,8 +231,12 @@ class AvatarSession(rtc.EventEmitter[str]):
     async def _join_when_ready(self, agent_session: AgentSession) -> None:
         try:
             if await self._wait_until_started(live=True):
+                await self._wait_for_video(self._identity, 20)
+                # Switch between two sentences: what the agent is saying right now is finished in its own voice.
+                cut = not await self._wait_for_pause(agent_session)
                 self._attach(agent_session)
-                logger.info("avatar joined; the agent's speech goes to it now", extra={"session_id": self.session_id})
+                logger.info("avatar joined; the agent's speech goes to it now",
+                            extra={"session_id": self.session_id, "mid_sentence": cut})  # fmt: skip
                 self.emit("avatar_joined")
             else:
                 logger.warning("no avatar came free; the agent stays voice-only", extra={"session_id": self.session_id})
@@ -273,6 +296,15 @@ class AvatarSession(rtc.EventEmitter[str]):
         except Exception as error:  # noqa: BLE001 - it is billed no further either way
             logger.warning("could not end the replaced session", extra={"session_id": old_id, "error": str(error)})
         self.emit("avatar_upgraded")
+
+    async def _wait_for_pause(self, agent_session: AgentSession, timeout: float = UPGRADE_PAUSE_WAIT_SECONDS) -> bool:
+        """Wait until the agent is not speaking. False if it talked through the whole ``timeout``."""
+        deadline = time.monotonic() + timeout
+        while getattr(agent_session, "agent_state", None) == "speaking":
+            if self._closing or time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.05)
+        return True
 
     async def _wait_for_video(self, identity: str, timeout: float) -> bool:
         """Wait until ``identity`` is in the room and publishes video."""
@@ -356,6 +388,18 @@ class AvatarSession(rtc.EventEmitter[str]):
         thoughtful, empathetic, surprised or serious."""
         if self._room is not None:
             await self._room.local_participant.set_attributes({MOOD_ATTRIBUTE: mood})
+
+    async def set_action(self, action: str) -> None:
+        """Play a one-shot gesture (premium avatars), one of ``ACTIONS``: wave, thumbs_up, explain_hands,
+        look_side, tilt_smile, laugh, surprised or angry. It shows about three seconds later (hands; head moves
+        can take a few seconds longer), lasts a few seconds, also while the agent is silent, and then the avatar is
+        back in its mood. A gesture asked for while another one plays is dropped. How clearly a gesture comes out
+        depends on the photo; laugh, surprised and angry are the least reliable."""
+        if action not in ACTIONS:
+            raise ValueError(f"unknown action {action!r}; one of: {', '.join(ACTIONS)}")
+        if self._room is not None:
+            self._actions += 1
+            await self._room.local_participant.set_attributes({ACTION_ATTRIBUTE: f"{action}:{self._actions}"})
 
     async def aclose(self) -> None:
         """End the avatar session now. It also ends by itself when the agent leaves the room."""

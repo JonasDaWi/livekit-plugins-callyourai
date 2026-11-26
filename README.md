@@ -35,6 +35,42 @@ curl -X POST $API/v1/avatars -H "authorization: Bearer $KEY" -H 'content-type: a
      -d '{"name":"Me","image_url":"https://example.com/me.jpg"}'                                    # -> id
 ```
 
+## Moods and gestures
+
+```python
+await avatar.set_mood("friendly")     # the face for what the agent says next
+await avatar.set_action("wave")       # a one-shot gesture
+```
+
+Moods: `neutral`, `friendly`, `happy`, `laughing`, `thoughtful`, `empathetic`, `surprised`, `serious`.
+
+Gestures (`callyourai.ACTIONS`): `wave`, `thumbs_up`, `explain_hands`, `look_side`, `tilt_smile`, `laugh`,
+`surprised`, `angry`. A hand gesture shows about three seconds after the call (head moves can take a few seconds
+longer), lasts a few seconds and then the avatar is back in its mood. It also plays while the agent is silent. A
+gesture asked for while another one plays is dropped. Hands come into the picture from below, also on a
+head-and-shoulders photo. How clearly a gesture comes out depends on the photo: `wave` and `thumbs_up` work on most
+photos, `laugh`, `surprised` and `angry` are subtle or missing on some.
+
+Let the model decide when to gesture by giving your agent a tool:
+
+```python
+from livekit.agents import Agent, function_tool
+
+class Assistant(Agent):
+    def __init__(self, avatar: callyourai.AvatarSession) -> None:
+        super().__init__(instructions="Greet the user with a wave. Use gestures sparingly.")
+        self._avatar = avatar
+
+    @function_tool
+    async def gesture(self, action: str) -> str:
+        """Make the avatar gesture. action: wave, thumbs_up, explain_hands, look_side, tilt_smile, laugh,
+        surprised or angry."""
+        if action not in callyourai.ACTIONS:
+            return f"unknown gesture; use one of {', '.join(callyourai.ACTIONS)}"
+        await self._avatar.set_action(action)
+        return "done"
+```
+
 ## When every avatar is busy
 
 By default `start` raises `CallyouraiError` with code `no_capacity` when no avatar is free. Pass `wait_seconds`

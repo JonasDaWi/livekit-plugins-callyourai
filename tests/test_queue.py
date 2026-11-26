@@ -37,11 +37,14 @@ class FakeOutput:
 
 
 class FakeSession:
+    agent_state = "listening"
+
     def __init__(self, audio=None) -> None:
         self.output = FakeOutput(audio)
 
 
 def _avatar(answers: list, **kw) -> tuple[callyourai.AvatarSession, list]:
+    kw_video = {"video": kw.pop("video", True)}
     avatar = callyourai.AvatarSession(avatar_id="a1", api_key="k", **kw)
     calls: list = []
 
@@ -49,8 +52,14 @@ def _avatar(answers: list, **kw) -> tuple[callyourai.AvatarSession, list]:
         calls.append((method, path, body))
         return answers.pop(0)
 
+    video = kw_video.pop("video", True)
+
+    async def wait_for_video(identity, timeout):
+        return video
+
     avatar._call = call
     avatar._token = lambda: "tok"
+    avatar._wait_for_video = wait_for_video
     return avatar, calls
 
 
@@ -102,3 +111,45 @@ def test_a_free_avatar_attaches_at_once_and_hd_is_asked_for():
     asyncio.run(avatar.start(session, FakeRoom(), livekit_url="wss://lk", livekit_api_key="k", livekit_api_secret="s"))
     assert calls[0][2]["hd"] is True and "wait_seconds" not in calls[0][2]
     assert session.output.audio == ("sink", "callyourai-avatar")
+
+
+def test_a_cold_start_keeps_the_agents_own_voice_and_the_avatar_takes_over_later():
+    """A worker has the session but no video yet: the agent must not wait in silence for it."""
+    avatar, _ = _avatar([{"session_id": "s1", "status": "starting"}, {"status": "starting"}, {"status": "live"}], video=False)
+    events = []
+    avatar.on("avatar_joined", lambda: events.append("joined"))
+    session = FakeSession(audio="room-audio")
+
+    async def run():
+        await avatar.start(session, FakeRoom(), livekit_url="wss://lk", livekit_api_key="k", livekit_api_secret="s")
+        assert session.output.tail is None  # no video within the grace time: still the agent's own voice
+        await avatar._joining
+
+    asyncio.run(run())
+    assert session.output.tail == ("sink", "callyourai-avatar") and events == ["joined"]
+
+
+def test_a_free_avatar_with_video_speaks_from_the_first_word_even_if_the_agent_has_its_own_voice():
+    avatar, _ = _avatar([{"session_id": "s1", "status": "starting"}])
+    session = FakeSession(audio="room-audio")
+    asyncio.run(avatar.start(session, FakeRoom(), livekit_url="wss://lk", livekit_api_key="k", livekit_api_secret="s"))
+    assert session.output.tail == ("sink", "callyourai-avatar") and avatar._joining is None
+
+
+def test_the_avatar_takes_over_between_two_sentences_not_in_the_middle_of_one():
+    avatar, _ = _avatar([{"session_id": "s1", "status": "queued", "queue_position": 1}, {"status": "live"}], wait_seconds=60)
+    session = FakeSession(audio="room-audio")
+    session.agent_state = "speaking"
+    seen = []
+
+    async def run():
+        await avatar.start(session, FakeRoom(), livekit_url="wss://lk", livekit_api_key="k", livekit_api_secret="s")
+        for _ in range(50):                      # the avatar is live, but the agent is in the middle of a sentence
+            await asyncio.sleep(0)
+        seen.append(session.output.tail)
+        session.agent_state = "listening"        # the sentence is over
+        await avatar._joining
+        seen.append(session.output.tail)
+
+    asyncio.run(run())
+    assert seen == [None, ("sink", "callyourai-avatar")]
